@@ -880,6 +880,12 @@ sendpld_ack(br_ssl_engine_context *rc, size_t len)
 	}
 	rc->oxa += len;
 	if (rc->oxa >= rc->oxb) {
+		/*
+		 * Set oxb to one more than oxa so that sendpld_flush()
+		 * does not mistakingly believe that a record is
+		 * already prepared and being sent.
+		 */
+		rc->oxb = rc->oxa + 1;
 		sendpld_flush(rc, 0);
 	}
 }
@@ -1085,6 +1091,9 @@ jump_handshake(br_ssl_engine_context *cc, int action)
 		cc->hlen_out = hlen_out;
 		cc->action = action;
 		cc->hsrun(&cc->cpu);
+		if (br_ssl_engine_closed(cc)) {
+			return;
+		}
 		if (cc->hbuf_out != cc->saved_hbuf_out) {
 			sendpld_ack(cc, cc->hbuf_out - cc->saved_hbuf_out);
 		}
@@ -1233,7 +1242,9 @@ br_ssl_engine_close(br_ssl_engine_context *cc)
 int
 br_ssl_engine_renegotiate(br_ssl_engine_context *cc)
 {
-	if (br_ssl_engine_closed(cc) || cc->reneg == 1) {
+	if (br_ssl_engine_closed(cc) || cc->reneg == 1
+		|| (cc->flags & BR_OPT_NO_RENEGOTIATION) != 0)
+	{
 		return 0;
 	}
 	jump_handshake(cc, 2);
@@ -1465,4 +1476,45 @@ br_ssl_engine_switch_gcm_out(br_ssl_engine_context *cc,
 	}
 	cc->igcm_out->init(&cc->out.gcm.vtable.out,
 		bc_impl, cipher_key, cipher_key_len, cc->ighash, iv);
+}
+
+/* see inner.h */
+void
+br_ssl_engine_switch_chapol_in(br_ssl_engine_context *cc,
+	int is_client, int prf_id)
+{
+	unsigned char kb[88];
+	unsigned char *cipher_key, *iv;
+
+	compute_key_block(cc, prf_id, 44, kb);
+	if (is_client) {
+		cipher_key = &kb[32];
+		iv = &kb[76];
+	} else {
+		cipher_key = &kb[0];
+		iv = &kb[64];
+	}
+	cc->ichapol_in->init(&cc->in.chapol.vtable.in,
+		cc->ichacha, cc->ipoly, cipher_key, iv);
+	cc->incrypt = 1;
+}
+
+/* see inner.h */
+void
+br_ssl_engine_switch_chapol_out(br_ssl_engine_context *cc,
+	int is_client, int prf_id)
+{
+	unsigned char kb[88];
+	unsigned char *cipher_key, *iv;
+
+	compute_key_block(cc, prf_id, 44, kb);
+	if (is_client) {
+		cipher_key = &kb[0];
+		iv = &kb[64];
+	} else {
+		cipher_key = &kb[32];
+		iv = &kb[76];
+	}
+	cc->ichapol_out->init(&cc->out.chapol.vtable.out,
+		cc->ichacha, cc->ipoly, cipher_key, iv);
 }

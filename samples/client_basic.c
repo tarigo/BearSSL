@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <signal.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -201,7 +202,7 @@ static const unsigned char TA1_EC_Q[] = {
 
 static const br_x509_trust_anchor TAs[2] = {
 	{
-		(unsigned char *)TA0_DN, sizeof TA0_DN,
+		{ (unsigned char *)TA0_DN, sizeof TA0_DN },
 		BR_X509_TA_CA,
 		{
 			BR_KEYTYPE_RSA,
@@ -212,7 +213,7 @@ static const br_x509_trust_anchor TAs[2] = {
 		}
 	},
 	{
-		(unsigned char *)TA1_DN, sizeof TA1_DN,
+		{ (unsigned char *)TA1_DN, sizeof TA1_DN },
 		BR_X509_TA_CA,
 		{
 			BR_KEYTYPE_EC,
@@ -259,6 +260,11 @@ main(int argc, char *argv[])
 	} else {
 		path = "/";
 	}
+
+	/*
+	 * Ignore SIGPIPE to avoid crashing in case of abrupt socket close.
+	 */
+	signal(SIGPIPE, SIG_IGN);
 
 	/*
 	 * Open the socket to the target server.

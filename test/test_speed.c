@@ -161,6 +161,46 @@ test_speed_ ## fname(void) \
 	} \
 }
 
+#define SPEED_CHACHA20(Name, fname) \
+static void \
+test_speed_ ## fname(void) \
+{ \
+	unsigned char key[32]; \
+	unsigned char buf[8192]; \
+	unsigned char iv[12]; \
+	int i; \
+	long num; \
+ \
+	memset(key, 'T', sizeof key); \
+	memset(buf, 'P', sizeof buf); \
+	memset(iv, 'X', sizeof iv); \
+	for (i = 0; i < 10; i ++) { \
+		br_ ## fname ## _run(key, iv, i, buf, sizeof buf); \
+	} \
+	num = 10; \
+	for (;;) { \
+		clock_t begin, end; \
+		double tt; \
+		long k; \
+ \
+		begin = clock(); \
+		for (k = num; k > 0; k --) { \
+			br_ ## fname ## _run(key, iv, \
+				(uint32_t)k, buf, sizeof buf); \
+		} \
+		end = clock(); \
+		tt = (double)(end - begin) / CLOCKS_PER_SEC; \
+		if (tt >= 2.0) { \
+			printf("%-30s %8.2f MB/s\n", #Name, \
+				((double)sizeof buf) * (double)num \
+				/ (tt * 1000000.0)); \
+			fflush(stdout); \
+			return; \
+		} \
+		num <<= 1; \
+	} \
+}
+
 SPEED_HASH(MD5, md5)
 SPEED_HASH(SHA-1, sha1)
 SPEED_HASH(SHA-256, sha256)
@@ -190,6 +230,8 @@ SPEED_BLOCKCIPHER_CBC(3DES CBC decrypt (iname), 3des_ ## iname ## _cbcdec, des_ 
 
 SPEED_DES(tab)
 SPEED_DES(ct)
+
+SPEED_CHACHA20(ChaCha20, chacha20_ct)
 
 static void
 test_speed_ghash_inner(char *name, br_ghash gh)
@@ -243,6 +285,66 @@ static void
 test_speed_ghash_ctmul64(void)
 {
 	test_speed_ghash_inner("GHASH (ctmul64)", &br_ghash_ctmul64);
+}
+
+static uint32_t
+fake_chacha20(const void *key, const void *iv,
+	uint32_t cc, void *data, size_t len)
+{
+	(void)key;
+	(void)iv;
+	(void)data;
+	(void)len;
+	return cc + (uint32_t)((len + 63) >> 6);
+}
+
+/*
+ * To speed-test Poly1305, we run it with a do-nothing stub instead of
+ * ChaCha20.
+ */
+static void
+test_speed_poly1305_inner(char *name, br_poly1305_run pl)
+{
+	unsigned char buf[8192], key[32], iv[12], aad[13], tag[16];
+	int i;
+	long num;
+
+	memset(key, 'K', sizeof key);
+	memset(iv, 'I', sizeof iv);
+	memset(aad, 'A', sizeof aad);
+	memset(buf, 'T', sizeof buf);
+	for (i = 0; i < 10; i ++) {
+		pl(key, iv, buf, sizeof buf,
+			aad, sizeof aad, tag, &fake_chacha20, 0);
+	}
+	num = 10;
+	for (;;) {
+		clock_t begin, end;
+		double tt;
+		long k;
+
+		begin = clock();
+		for (k = num; k > 0; k --) {
+			pl(key, iv, buf, sizeof buf,
+				aad, sizeof aad, tag, &fake_chacha20, 0);
+		}
+		end = clock();
+		tt = (double)(end - begin) / CLOCKS_PER_SEC;
+		if (tt >= 2.0) {
+			printf("%-30s %8.2f MB/s\n", name,
+				((double)sizeof buf) * (double)num
+				/ (tt * 1000000.0));
+			fflush(stdout);
+			return;
+		}
+		num <<= 1;
+	}
+}
+
+static void
+test_speed_poly1305_ctmul(void)
+{
+	test_speed_poly1305_inner("Poly1305 (ctmul)", &br_poly1305_ctmul_run);
 }
 
 static const unsigned char RSA_N[] = {
@@ -1018,9 +1120,13 @@ static const struct {
 	STU(3des_ct_cbcenc),
 	STU(3des_ct_cbcdec),
 
+	STU(chacha20_ct),
+
 	STU(ghash_ctmul),
 	STU(ghash_ctmul32),
 	STU(ghash_ctmul64),
+
+	STU(poly1305_ctmul),
 
 	STU(rsa_i31),
 	STU(rsa_i32),
