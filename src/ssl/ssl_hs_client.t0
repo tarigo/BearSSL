@@ -286,10 +286,7 @@ make_pms_ecdh(br_ssl_client_context *ctx, unsigned ecdhe, int prf_id)
 	 */
 	br_ssl_engine_compute_master(&ctx->eng, prf_id, point + 1, glen >> 1);
 
-	memcpy(point, generator, glen);
-	if (!ctx->eng.iec->mul(point, glen, key, olen, curve)) {
-		return -BR_ERR_INVALID_ALGORITHM;
-	}
+	ctx->eng.iec->mulgen(point, key, olen, curve);
 	memcpy(ctx->eng.pad, point, glen);
 	return (int)glen;
 }
@@ -429,6 +426,21 @@ addr-ctx: hash_id
 : ext-point-format-length ( -- len )
 	supported-curves if 6 else 0 then ;
 
+\ Length of ALPN extension.
+cc: ext-ALPN-length ( -- len ) {
+	size_t u, len;
+
+	if (ENG->protocol_names_num == 0) {
+		T0_PUSH(0);
+		T0_RET();
+	}
+	len = 6;
+	for (u = 0; u < ENG->protocol_names_num; u ++) {
+		len += 1 + strlen(ENG->protocol_names[u]);
+	}
+	T0_PUSH(len);
+}
+
 \ Write handshake message: ClientHello
 : write-ClientHello ( -- )
 	{ ; total-ext-length }
@@ -438,6 +450,7 @@ addr-ctx: hash_id
 	ext-reneg-length ext-sni-length + ext-frag-length +
 	ext-signatures-length +
 	ext-supported-curves-length + ext-point-format-length +
+	ext-ALPN-length +
 	>total-ext-length
 
 	\ ClientHello type
@@ -542,6 +555,21 @@ addr-ctx: hash_id
 			0x0002 write16          \ extension length
 			0x0100 write16          \ value: 1 format: uncompressed
 		then
+		ext-ALPN-length dup if
+			0x0010 write16          \ extension type (16)
+			4 - dup write16         \ extension length
+			2- write16              \ list length
+			addr-protocol_names_num get16 0
+			begin
+				dup2 > while
+				dup copy-protocol-name
+				dup write8 addr-pad swap write-blob
+				1+
+			repeat
+			2drop
+		else
+			drop
+		then
 		ext-padding-amount 0< ifnot
 			0x0015 write16          \ extension value (21)
 			ext-padding-amount
@@ -593,6 +621,24 @@ addr-ctx: hash_id
 		addr-saved_finished addr-pad 24 memcmp ifnot
 			ERR_BAD_SECRENEG fail
 		then
+	then ;
+
+\ Read the ALPN extension from the server. It must contain a single name,
+\ and that name must match one of our names.
+: read-ALPN-from-server ( lim -- lim )
+	\ Extension contents length.
+	read16 open-elt
+	\ Length of list of names.
+	read16 open-elt
+	\ There should be a single name.
+	read8 addr-pad swap dup { len } read-blob
+	close-elt
+	close-elt
+	len test-protocol-name dup 0< if
+		3 flag? if ERR_UNEXPECTED fail then
+		drop
+	else
+		1+ addr-selected_protocol set16
 	then ;
 
 \ Save a value in a 16-bit field, or check it in case of session resumption.
@@ -688,6 +734,7 @@ cc: DEBUG-BLOB ( addr len -- ) {
 		ext-signatures-length { ok-signatures }
 		ext-supported-curves-length { ok-curves }
 		ext-point-format-length { ok-points }
+		ext-ALPN-length { ok-ALPN }
 		begin dup while
 			read16
 			case
@@ -751,6 +798,15 @@ cc: DEBUG-BLOB ( addr len -- ) {
 					then
 					0 >ok-points
 					read-ignore-16
+				endof
+
+				\ ALPN.
+				0x0010 of
+					ok-ALPN ifnot
+						ERR_EXTRA_EXTENSION fail
+					then
+					0 >ok-ALPN
+					read-ALPN-from-server
 				endof
 
 				ERR_EXTRA_EXTENSION fail
@@ -1102,6 +1158,7 @@ cc: do-client-sign ( -- sig_len ) {
 : do-handshake ( -- )
 	0 addr-application_data set8
 	22 addr-record_type_out set8
+	0 addr-selected_protocol set16
 	multihash-init
 
 	write-ClientHello

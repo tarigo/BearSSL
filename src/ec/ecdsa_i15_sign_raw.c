@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016 Thomas Pornin <pornin@bolet.org>
+ * Copyright (c) 2017 Thomas Pornin <pornin@bolet.org>
  *
  * Permission is hereby granted, free of charge, to any person obtaining 
  * a copy of this software and associated documentation files (the
@@ -24,13 +24,13 @@
 
 #include "inner.h"
 
-#define I31_LEN     ((BR_MAX_EC_SIZE + 61) / 31)
+#define I15_LEN     ((BR_MAX_EC_SIZE + 29) / 15)
 #define POINT_LEN   (1 + (((BR_MAX_EC_SIZE + 7) >> 3) << 1))
 #define ORDER_LEN   ((BR_MAX_EC_SIZE + 7) >> 3)
 
 /* see bearssl_ec.h */
 size_t
-br_ecdsa_i31_sign_raw(const br_ec_impl *impl,
+br_ecdsa_i15_sign_raw(const br_ec_impl *impl,
 	const br_hash_class *hf, const void *hash_value,
 	const br_ec_private_key *sk, void *sig)
 {
@@ -42,12 +42,13 @@ br_ecdsa_i31_sign_raw(const br_ec_impl *impl,
 	 * from 0 and 1.
 	 */
 	const br_ec_curve_def *cd;
-	uint32_t n[I31_LEN], r[I31_LEN], s[I31_LEN], x[I31_LEN];
-	uint32_t m[I31_LEN], k[I31_LEN], t1[I31_LEN], t2[I31_LEN];
+	uint16_t n[I15_LEN], r[I15_LEN], s[I15_LEN], x[I15_LEN];
+	uint16_t m[I15_LEN], k[I15_LEN], t1[I15_LEN], t2[I15_LEN];
 	unsigned char tt[ORDER_LEN << 1];
 	unsigned char eU[POINT_LEN];
 	size_t hash_len, nlen, ulen;
-	uint32_t n0i, ctl;
+	uint16_t n0i;
+	uint32_t ctl;
 	br_hmac_drbg_context drbg;
 
 	/*
@@ -78,18 +79,18 @@ br_ecdsa_i31_sign_raw(const br_ec_impl *impl,
 	 * Get modulus.
 	 */
 	nlen = cd->order_len;
-	br_i31_decode(n, cd->order, nlen);
-	n0i = br_i31_ninv31(n[1]);
+	br_i15_decode(n, cd->order, nlen);
+	n0i = br_i15_ninv15(n[1]);
 
 	/*
-	 * Get private key as an i31 integer. This also checks that the
+	 * Get private key as an i15 integer. This also checks that the
 	 * private key is well-defined (not zero, and less than the
 	 * curve order).
 	 */
-	if (!br_i31_decode_mod(x, sk->x, sk->xlen, n)) {
+	if (!br_i15_decode_mod(x, sk->x, sk->xlen, n)) {
 		return 0;
 	}
-	if (br_i31_iszero(x)) {
+	if (br_i15_iszero(x)) {
 		return 0;
 	}
 
@@ -101,8 +102,8 @@ br_ecdsa_i31_sign_raw(const br_ec_impl *impl,
 	/*
 	 * Truncate and reduce the hash value modulo the curve order.
 	 */
-	br_ecdsa_i31_bits2int(m, hash_value, hash_len, n[0]);
-	br_i31_sub(m, n, br_i31_sub(m, n, 0) ^ 1);
+	br_ecdsa_i15_bits2int(m, hash_value, hash_len, n[0]);
+	br_i15_sub(m, n, br_i15_sub(m, n, 0) ^ 1);
 
 	/*
 	 * RFC 6979 generation of the "k" value.
@@ -112,16 +113,16 @@ br_ecdsa_i31_sign_raw(const br_ec_impl *impl,
 	 * concatenation of the encodings of the private key and
 	 * the hash value (after truncation and modular reduction).
 	 */
-	br_i31_encode(tt, nlen, x);
-	br_i31_encode(tt + nlen, nlen, m);
+	br_i15_encode(tt, nlen, x);
+	br_i15_encode(tt + nlen, nlen, m);
 	br_hmac_drbg_init(&drbg, hf, tt, nlen << 1);
 	for (;;) {
 		br_hmac_drbg_generate(&drbg, tt, nlen);
-		br_ecdsa_i31_bits2int(k, tt, nlen, n[0]);
-		if (br_i31_iszero(k)) {
+		br_ecdsa_i15_bits2int(k, tt, nlen, n[0]);
+		if (br_i15_iszero(k)) {
 			continue;
 		}
-		if (br_i31_sub(k, n, 0)) {
+		if (br_i15_sub(k, n, 0)) {
 			break;
 		}
 	}
@@ -132,42 +133,42 @@ br_ecdsa_i31_sign_raw(const br_ec_impl *impl,
 	 * prime order, that reduction is only a matter of computing
 	 * a subtraction.
 	 */
-	br_i31_encode(tt, nlen, k);
+	br_i15_encode(tt, nlen, k);
 	ulen = impl->mulgen(eU, tt, nlen, sk->curve);
-	br_i31_zero(r, n[0]);
-	br_i31_decode(r, &eU[1], ulen >> 1);
+	br_i15_zero(r, n[0]);
+	br_i15_decode(r, &eU[1], ulen >> 1);
 	r[0] = n[0];
-	br_i31_sub(r, n, br_i31_sub(r, n, 0) ^ 1);
+	br_i15_sub(r, n, br_i15_sub(r, n, 0) ^ 1);
 
 	/*
 	 * Compute 1/k in double-Montgomery representation. We do so by
 	 * first converting _from_ Montgomery representation (twice),
 	 * then using a modular exponentiation.
 	 */
-	br_i31_from_monty(k, n, n0i);
-	br_i31_from_monty(k, n, n0i);
+	br_i15_from_monty(k, n, n0i);
+	br_i15_from_monty(k, n, n0i);
 	memcpy(tt, cd->order, nlen);
 	tt[nlen - 1] -= 2;
-	br_i31_modpow(k, tt, nlen, n, n0i, t1, t2);
+	br_i15_modpow(k, tt, nlen, n, n0i, t1, t2);
 
 	/*
 	 * Compute s = (m+xr)/k (mod n).
 	 * The k[] array contains R^2/k (double-Montgomery representation);
 	 * we thus can use direct Montgomery multiplications and conversions
-	 * from Montgomery, avoiding any call to br_i31_to_monty() (which
+	 * from Montgomery, avoiding any call to br_i15_to_monty() (which
 	 * is slower).
 	 */
-	br_i31_from_monty(m, n, n0i);
-	br_i31_montymul(t1, x, r, n, n0i);
-	ctl = br_i31_add(t1, m, 1);
-	ctl |= br_i31_sub(t1, n, 0) ^ 1;
-	br_i31_sub(t1, n, ctl);
-	br_i31_montymul(s, t1, k, n, n0i);
+	br_i15_from_monty(m, n, n0i);
+	br_i15_montymul(t1, x, r, n, n0i);
+	ctl = br_i15_add(t1, m, 1);
+	ctl |= br_i15_sub(t1, n, 0) ^ 1;
+	br_i15_sub(t1, n, ctl);
+	br_i15_montymul(s, t1, k, n, n0i);
 
 	/*
 	 * Encode r and s in the signature.
 	 */
-	br_i31_encode(sig, nlen, r);
-	br_i31_encode((unsigned char *)sig + nlen, nlen, s);
+	br_i15_encode(sig, nlen, r);
+	br_i15_encode((unsigned char *)sig + nlen, nlen, s);
 	return nlen << 1;
 }

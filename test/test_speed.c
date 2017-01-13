@@ -347,6 +347,19 @@ test_speed_poly1305_ctmul(void)
 	test_speed_poly1305_inner("Poly1305 (ctmul)", &br_poly1305_ctmul_run);
 }
 
+static void
+test_speed_poly1305_ctmul32(void)
+{
+	test_speed_poly1305_inner("Poly1305 (ctmul32)",
+		&br_poly1305_ctmul32_run);
+}
+
+static void
+test_speed_poly1305_i15(void)
+{
+	test_speed_poly1305_inner("Poly1305 (i15)", &br_poly1305_i15_run);
+}
+
 static const unsigned char RSA_N[] = {
 	0xE9, 0xF2, 0x4A, 0x2F, 0x96, 0xDF, 0x0A, 0x23,
 	0x01, 0x85, 0xF1, 0x2C, 0xB2, 0xA8, 0xEF, 0x23,
@@ -558,6 +571,13 @@ test_speed_rsa_inner(char *name,
 }
 
 static void
+test_speed_rsa_i15(void)
+{
+	test_speed_rsa_inner("RSA i15",
+		&br_rsa_i15_public, &br_rsa_i15_private);
+}
+
+static void
 test_speed_rsa_i31(void)
 {
 	test_speed_rsa_inner("RSA i31",
@@ -572,7 +592,7 @@ test_speed_rsa_i32(void)
 }
 
 static void
-test_speed_ec_inner(const char *name,
+test_speed_ec_inner_1(const char *name,
 	const br_ec_impl *impl, const br_ec_curve_def *cd)
 {
 	unsigned char bx[80], U[160];
@@ -611,6 +631,72 @@ test_speed_ec_inner(const char *name,
 		}
 		num <<= 1;
 	}
+}
+
+static void
+test_speed_ec_inner_2(const char *name,
+	const br_ec_impl *impl, const br_ec_curve_def *cd)
+{
+	unsigned char bx[80], U[160];
+	uint32_t x[22], n[22];
+	size_t nlen;
+	int i;
+	long num;
+
+	nlen = cd->order_len;
+	br_i31_decode(n, cd->order, nlen);
+	memset(bx, 'T', sizeof bx);
+	br_i31_decode_reduce(x, bx, sizeof bx, n);
+	br_i31_encode(bx, nlen, x);
+	for (i = 0; i < 10; i ++) {
+		impl->mulgen(U, bx, nlen, cd->curve);
+	}
+	num = 10;
+	for (;;) {
+		clock_t begin, end;
+		double tt;
+		long k;
+
+		begin = clock();
+		for (k = num; k > 0; k --) {
+			impl->mulgen(U, bx, nlen, cd->curve);
+		}
+		end = clock();
+		tt = (double)(end - begin) / CLOCKS_PER_SEC;
+		if (tt >= 2.0) {
+			printf("%-30s %8.2f mul/s\n", name,
+				(double)num / tt);
+			fflush(stdout);
+			break;
+		}
+		num <<= 1;
+	}
+}
+
+static void
+test_speed_ec_inner(const char *name,
+	const br_ec_impl *impl, const br_ec_curve_def *cd)
+{
+	char tmp[50];
+
+	test_speed_ec_inner_1(name, impl, cd);
+	sprintf(tmp, "%s (FP)", name);
+	test_speed_ec_inner_2(tmp, impl, cd);
+}
+
+static void
+test_speed_ec_p256_i15(void)
+{
+	test_speed_ec_inner("EC i15/spec P-256",
+		&br_ec_p256_i15, &br_secp256r1);
+}
+
+static void
+test_speed_ec_prime_i15(void)
+{
+	test_speed_ec_inner("EC i15 P-256", &br_ec_prime_i15, &br_secp256r1);
+	test_speed_ec_inner("EC i15 P-384", &br_ec_prime_i15, &br_secp384r1);
+	test_speed_ec_inner("EC i15 P-521", &br_ec_prime_i15, &br_secp521r1);
 }
 
 static void
@@ -704,6 +790,32 @@ test_speed_ecdsa_inner(const char *name,
 		}
 		num <<= 1;
 	}
+}
+
+static void
+test_speed_ecdsa_p256_i15(void)
+{
+	test_speed_ecdsa_inner("ECDSA i15 P-256 (spec)",
+		&br_ec_p256_i15, &br_secp256r1,
+		&br_ecdsa_i15_sign_asn1,
+		&br_ecdsa_i15_vrfy_asn1);
+}
+
+static void
+test_speed_ecdsa_i15(void)
+{
+	test_speed_ecdsa_inner("ECDSA i15 P-256",
+		&br_ec_prime_i15, &br_secp256r1,
+		&br_ecdsa_i15_sign_asn1,
+		&br_ecdsa_i15_vrfy_asn1);
+	test_speed_ecdsa_inner("ECDSA i15 P-384",
+		&br_ec_prime_i15, &br_secp384r1,
+		&br_ecdsa_i15_sign_asn1,
+		&br_ecdsa_i15_vrfy_asn1);
+	test_speed_ecdsa_inner("ECDSA i15 P-521",
+		&br_ec_prime_i15, &br_secp521r1,
+		&br_ecdsa_i15_sign_asn1,
+		&br_ecdsa_i15_vrfy_asn1);
 }
 
 static void
@@ -1127,10 +1239,17 @@ static const struct {
 	STU(ghash_ctmul64),
 
 	STU(poly1305_ctmul),
+	STU(poly1305_ctmul32),
+	STU(poly1305_i15),
 
+	STU(rsa_i15),
 	STU(rsa_i31),
 	STU(rsa_i32),
+	STU(ec_p256_i15),
+	STU(ec_prime_i15),
 	STU(ec_prime_i31),
+	STU(ecdsa_p256_i15),
+	STU(ecdsa_i15),
 	STU(ecdsa_i31),
 
 	STU(i31)
