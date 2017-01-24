@@ -65,6 +65,11 @@
  *      Callback method that returns a pointer to the subgroup order for
  *      that curve. That value uses unsigned big-endian encoding.
  *
+ *   - `xoff()`
+ *
+ *      Callback method that returns the offset and length of the X
+ *      coordinate in an encoded point.
+ *
  *   - `mul()`
  *
  *      Multiply a curve point with an integer.
@@ -218,6 +223,12 @@
 /** \brief Identifier for named curve brainpoolP512r1. */
 #define BR_EC_brainpoolP512r1    28
 
+/** \brief Identifier for named curve Curve25519. */
+#define BR_EC_curve25519         29
+
+/** \brief Identifier for named curve Curve448. */
+#define BR_EC_curve448           30
+
 /**
  * \brief Structure for an EC public key.
  */
@@ -287,6 +298,18 @@ typedef struct {
 	 * \return  the encoded order.
 	 */
 	const unsigned char *(*order)(int curve, size_t *len);
+
+	/**
+	 * \brief Get the offset and length for the X coordinate.
+	 *
+	 * This function returns the offset and length (in bytes) of
+	 * the X coordinate in an encoded non-zero point.
+	 *
+	 * \param curve   curve identifier.
+	 * \param len     receiver for the X coordinate length (in bytes).
+	 * \return  the offset for the X coordinate (in bytes).
+	 */
+	size_t (*xoff)(int curve, size_t *len);
 
 	/**
 	 * \brief Multiply a curve point by an integer.
@@ -404,14 +427,90 @@ extern const br_ec_impl br_ec_prime_i31;
 extern const br_ec_impl br_ec_prime_i15;
 
 /**
- * \brief EC implementation "i15" for P-256.
+ * \brief EC implementation "m15" for P-256.
  *
  * This implementation uses specialised code for curve secp256r1 (also
- * known as NIST P-256), with Karatsuba decomposition, and fast modular
- * reduction thanks to the field modulus special format. Only 32-bit
- * multiplications are used (with 32-bit results, not 64-bit).
+ * known as NIST P-256), with optional Karatsuba decomposition, and fast
+ * modular reduction thanks to the field modulus special format. Only
+ * 32-bit multiplications are used (with 32-bit results, not 64-bit).
  */
-extern const br_ec_impl br_ec_p256_i15;
+extern const br_ec_impl br_ec_p256_m15;
+
+/**
+ * \brief EC implementation "m31" for P-256.
+ *
+ * This implementation uses specialised code for curve secp256r1 (also
+ * known as NIST P-256), relying on multiplications of 31-bit values
+ * (MUL31).
+ */
+extern const br_ec_impl br_ec_p256_m31;
+
+/**
+ * \brief EC implementation "i15" (generic code) for Curve25519.
+ *
+ * This implementation uses the generic code for modular integers (with
+ * 15-bit words) to support Curve25519. Due to the specificities of the
+ * curve definition, the following applies:
+ *
+ *   - `muladd()` is not implemented (the function returns 0 systematically).
+ *   - `order()` returns 2^255-1, since the point multiplication algorithm
+ *     accepts any 32-bit integer as input (it clears the top bit and low
+ *     three bits systematically).
+ */
+extern const br_ec_impl br_ec_c25519_i15;
+
+/**
+ * \brief EC implementation "i31" (generic code) for Curve25519.
+ *
+ * This implementation uses the generic code for modular integers (with
+ * 31-bit words) to support Curve25519. Due to the specificities of the
+ * curve definition, the following applies:
+ *
+ *   - `muladd()` is not implemented (the function returns 0 systematically).
+ *   - `order()` returns 2^255-1, since the point multiplication algorithm
+ *     accepts any 32-bit integer as input (it clears the top bit and low
+ *     three bits systematically).
+ */
+extern const br_ec_impl br_ec_c25519_i31;
+
+/**
+ * \brief EC implementation "m15" (specialised code) for Curve25519.
+ *
+ * This implementation uses custom code relying on multiplication of
+ * integers up to 15 bits. Due to the specificities of the curve
+ * definition, the following applies:
+ *
+ *   - `muladd()` is not implemented (the function returns 0 systematically).
+ *   - `order()` returns 2^255-1, since the point multiplication algorithm
+ *     accepts any 32-bit integer as input (it clears the top bit and low
+ *     three bits systematically).
+ */
+extern const br_ec_impl br_ec_c25519_m15;
+
+/**
+ * \brief EC implementation "m31" (specialised code) for Curve25519.
+ *
+ * This implementation uses custom code relying on multiplication of
+ * integers up to 31 bits. Due to the specificities of the curve
+ * definition, the following applies:
+ *
+ *   - `muladd()` is not implemented (the function returns 0 systematically).
+ *   - `order()` returns 2^255-1, since the point multiplication algorithm
+ *     accepts any 32-bit integer as input (it clears the top bit and low
+ *     three bits systematically).
+ */
+extern const br_ec_impl br_ec_c25519_m31;
+
+/**
+ * \brief Aggregate EC implementation "m15".
+ *
+ * This implementation is a wrapper for:
+ *
+ *   - `br_ec_c25519_m15` for Curve25519
+ *   - `br_ec_p256_m15` for NIST P-256
+ *   - `br_ec_prime_i15` for other curves (NIST P-384 and NIST-P512)
+ */
+extern const br_ec_impl br_ec_all_m15;
 
 /**
  * \brief Convert a signature from "raw" to "asn1".
